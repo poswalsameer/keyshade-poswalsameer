@@ -72,11 +72,16 @@ export default function SecretCard({
   >({})
 
   const handleDecryptValues = (environmentSlug: Environment['slug']) => {
+    // eslint-disable-next-line no-console -- console.error is used for debugging
+    console.log("env value in handleDecryptValues: ", environmentSlug)
     if (!privateKey) return
     const targetValue = values.find(
       (value) => value.environment.slug === environmentSlug
     )
     if (!targetValue) return
+
+    // eslint-disable-next-line no-console -- console.error is used for debugging
+    console.log("target value: ", targetValue)
 
     decrypt(privateKey, targetValue.value)
       .then((decrypted) => {

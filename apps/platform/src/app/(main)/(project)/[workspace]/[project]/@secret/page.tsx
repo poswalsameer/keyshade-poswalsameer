@@ -84,18 +84,18 @@ export default function SecretPage(): React.JSX.Element {
           secrets:
             page === 0
               ? data.items.map((item) => ({
+                slug: item.secret.slug,
+                name: item.secret.name,
+                note: item.secret.note
+              }))
+              : [
+                ...prev.secrets,
+                ...data.items.map((item) => ({
                   slug: item.secret.slug,
                   name: item.secret.name,
                   note: item.secret.note
                 }))
-              : [
-                  ...prev.secrets,
-                  ...data.items.map((item) => ({
-                    slug: item.secret.slug,
-                    name: item.secret.name,
-                    note: item.secret.note
-                  }))
-                ]
+              ]
         }))
       })
       .finally(() => setIsLoading(false))
@@ -148,8 +148,8 @@ export default function SecretPage(): React.JSX.Element {
                 <SecretCard
                   className={cn(
                     highlightSlug === secretData.secret.slug &&
-                      isHighlighted &&
-                      'animate-highlight'
+                    isHighlighted &&
+                    'animate-highlight'
                   )}
                   isDecrypted={isDecrypted}
                   key={secretData.secret.id}
@@ -177,7 +177,11 @@ export default function SecretPage(): React.JSX.Element {
           {isDeleteSecretOpen && selectedSecret ? (
             <ConfirmDeleteSecret />
           ) : null}
-          {isEditSecretOpen && selectedSecret ? <EditSecretSheet /> : null}
+          {isEditSecretOpen && selectedSecret ? (
+            <EditSecretSheet 
+              privateKey={projectPrivateKey}
+            />
+          ) : null}
           {isDeleteEnvironmentValueOfSecretOpen && selectedSecret ? (
             <ConfirmDeleteEnvironmentValueOfSecretDialog />
           ) : null}

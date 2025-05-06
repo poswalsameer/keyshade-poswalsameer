@@ -1,5 +1,5 @@
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import {
   Sheet,
@@ -26,8 +26,13 @@ import {
   mergeExistingEnvironments,
   parseUpdatedEnvironmentValues
 } from '@/lib/utils'
+import { decrypt } from '@/lib/decrypt'
 
-export default function EditSecretSheet(): JSX.Element {
+export default function EditSecretSheet({
+  privateKey,
+}: {
+  privateKey: string | null
+}): JSX.Element {
   const [isEditSecretSheetOpen, setIsEditSecretSheetOpen] =
     useAtom(editSecretOpenAtom)
   const selectedSecretData = useAtomValue(selectedSecretAtom)
@@ -44,14 +49,15 @@ export default function EditSecretSheet(): JSX.Element {
   const [environmentValues, setEnvironmentValues] = useState<
     Record<string, string>
   >(
-    () =>
-      selectedSecretData?.values.reduce(
-        (acc, entry) => {
-          acc[entry.environment.slug] = entry.value
-          return acc
-        },
-        {} as Record<string, string>
-      ) || {}
+    // () =>
+    //   selectedSecretData?.values.reduce(
+    //     (acc, entry) => {
+    //       acc[entry.environment.slug] = entry.value
+    //       return acc
+    //     },
+    //     {} as Record<string, string>
+    //   ) || {}
+    {}
   )
 
   const updateSecret = useHttp(() =>
@@ -59,7 +65,7 @@ export default function EditSecretSheet(): JSX.Element {
       secretSlug: selectedSecretData!.secret.slug,
       name:
         !requestData.name?.trim() ||
-        requestData.name === selectedSecretData!.secret.name
+          requestData.name === selectedSecretData!.secret.name
           ? undefined
           : requestData.name.trim(),
       note: requestData.note?.trim() || undefined,
@@ -83,6 +89,8 @@ export default function EditSecretSheet(): JSX.Element {
         const { success, data } = await updateSecret()
 
         if (success && data) {
+          // eslint-disable-next-line no-console -- console.error is used for debugging
+          console.log("data after edit: ", data)
           toast.success('Secret edited successfully', {
             description: (
               <p className="text-xs text-emerald-300">
@@ -128,6 +136,27 @@ export default function EditSecretSheet(): JSX.Element {
     requestData.note,
     handleClose
   ])
+
+  useEffect(() => {
+    if (selectedSecretData) {
+      if (!privateKey) return
+
+      const decryptedValues: Record<string, string> = {}
+
+      const decryptPromises = selectedSecretData.values.map((entry) => {
+        return decrypt(privateKey, entry.value)
+          .then((decrypted) => {
+            decryptedValues[entry.environment.slug] = decrypted
+          })
+      })
+
+      Promise.all(decryptPromises).then(() => {
+        setEnvironmentValues(decryptedValues)
+         
+        // console.log("decrypted values: ", decryptedValues)
+      })
+    }
+  }, [selectedSecretData, privateKey])
 
   return (
     <Sheet
