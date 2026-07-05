@@ -21,7 +21,7 @@ import {
 import { EventService } from '@/event/event.service'
 import { EventModule } from '@/event/event.module'
 import { UserModule } from '@/user/user.module'
-import { UserService } from '@/user/user.service'
+import { UserService } from '@/user/service/user.service'
 import { WorkspaceService } from './workspace.service'
 import { QueryTransformPipe } from '@/common/pipes/query.transform.pipe'
 import { ProjectModule } from '@/project/project.module'
@@ -102,9 +102,7 @@ describe('Workspace Controller Tests', () => {
       .useClass(MockMailService)
       .compile()
 
-    app = moduleRef.createNestApplication<NestFastifyApplication>(
-      new FastifyAdapter()
-    )
+    app = moduleRef.createNestApplication<any>(new FastifyAdapter() as any)
     prisma = moduleRef.get(PrismaService)
     eventService = moduleRef.get(EventService)
     userService = moduleRef.get(UserService)
@@ -124,32 +122,40 @@ describe('Workspace Controller Tests', () => {
 
   beforeEach(async () => {
     const createUser1 = await userService.createUser({
-      email: 'john@keyshade.xyz',
+      email: 'john@keyshade.io',
       name: 'John Doe',
       isOnboardingFinished: true
     })
 
     const createUser2 = await userService.createUser({
-      email: 'jane@keyshade.xyz',
+      email: 'jane@keyshade.io',
       name: 'Jane Doe',
       isOnboardingFinished: true
     })
 
     const createUser3 = await userService.createUser({
-      email: 'sadie@keyshade.xyz',
+      email: 'sadie@keyshade.io',
       name: 'Sadie',
       isOnboardingFinished: true
     })
-
-    workspace1 = createUser1.defaultWorkspace
     workspace2 = createUser2.defaultWorkspace
 
     delete createUser1.defaultWorkspace
     delete createUser2.defaultWorkspace
     delete createUser3.defaultWorkspace
 
-    user1 = { ...createUser1, ipAddress: USER_IP_ADDRESS }
-    user2 = { ...createUser2, ipAddress: USER_IP_ADDRESS }
+    user1 = {
+      ...createUser1,
+      ipAddress: USER_IP_ADDRESS
+    }
+    user2 = {
+      ...createUser2,
+      ipAddress: USER_IP_ADDRESS
+    }
+
+    workspace1 = await workspaceService.createWorkspace(user1, {
+      name: 'Workspace 1'
+    })
 
     memberRole = await prisma.workspaceRole.create({
       data: {
@@ -200,7 +206,7 @@ describe('Workspace Controller Tests', () => {
         },
         url: '/workspace',
         payload: {
-          name: 'Workspace 1',
+          name: 'Workspace 11',
           icon: '🤓'
         }
       })
@@ -208,11 +214,10 @@ describe('Workspace Controller Tests', () => {
       expect(response.statusCode).toBe(201)
       const body = response.json()
 
-      expect(body.name).toBe('Workspace 1')
+      expect(body.name).toBe('Workspace 11')
       expect(body.slug).toBeDefined()
       expect(body.icon).toBe('🤓')
       expect(body.ownerId).toBe(user1.id)
-      expect(body.isFreeTier).toBe(true)
       expect(body.isDefault).toBe(false)
     })
 
@@ -233,11 +238,6 @@ describe('Workspace Controller Tests', () => {
     })
 
     it('should let other user to create workspace with same name', async () => {
-      await workspaceService.createWorkspace(user1, {
-        name: 'Workspace 1',
-        icon: '🤓'
-      })
-
       const response = await app.inject({
         method: 'POST',
         headers: {
@@ -256,7 +256,6 @@ describe('Workspace Controller Tests', () => {
       expect(workspace2.name).toBe('Workspace 1')
       expect(workspace2.icon).toBe('🤓')
       expect(workspace2.ownerId).toBe(user2.id)
-      expect(workspace2.isFreeTier).toBe(true)
       expect(workspace2.isDefault).toBe(false)
     })
 
@@ -338,6 +337,21 @@ describe('Workspace Controller Tests', () => {
       expect(body.icon).toBe('🔥')
     })
 
+    it('should not allow updating the default workspace name', async () => {
+      const response = await app.inject({
+        method: 'PUT',
+        headers: {
+          'x-e2e-user-email': user2.email
+        },
+        url: `/workspace/${workspace2.slug}`,
+        payload: {
+          name: 'Default'
+        }
+      })
+
+      expect(response.statusCode).toBe(400)
+    })
+
     it('should not allow external user to update a workspace', async () => {
       const response = await app.inject({
         method: 'PUT',
@@ -411,7 +425,7 @@ describe('Workspace Controller Tests', () => {
 
   describe('Get All Workspace Of User Tests', () => {
     it('should be able to fetch all the workspaces the user is a member of', async () => {
-      // Create the invitation, but don't accept it.
+      // Create the invitation but don't accept it.
       await createMembership(memberRole.id, user2.id, workspace1.id, prisma)
 
       const response = await app.inject({
@@ -427,7 +441,7 @@ describe('Workspace Controller Tests', () => {
 
       const workspaceJson = response.json().items[0]
 
-      expect(workspaceJson.name).toEqual(workspace1.name)
+      expect(workspaceJson.name).toEqual('My Workspace')
       expect(workspaceJson.maxAllowedMembers).toBeDefined()
       expect(workspaceJson.maxAllowedProjects).toBeDefined()
       expect(workspaceJson.totalProjects).toBe(0)
@@ -794,13 +808,22 @@ describe('Workspace Controller Tests', () => {
     })
 
     it('should not be able to delete the default workspace', async () => {
+      const user1DefaultWorkspace = await prisma.workspace.findUnique({
+        where: {
+          name_ownerId: {
+            name: 'My Workspace',
+            ownerId: user1.id
+          }
+        }
+      })
+
       // Try deleting the default workspace
       const response = await app.inject({
         method: 'DELETE',
         headers: {
           'x-e2e-user-email': user1.email
         },
-        url: `/workspace/${workspace1.slug}`
+        url: `/workspace/${user1DefaultWorkspace.slug}`
       })
 
       expect(response.statusCode).toBe(400)

@@ -1,9 +1,14 @@
 import { z } from 'zod'
 import { PageRequestSchema, PageResponseSchema } from '@/pagination'
-import { eventTypeEnum, integrationTypeEnum } from '@/enums'
+import {
+  eventTypeEnum,
+  integrationRunStatusEnum,
+  integrationTypeEnum
+} from '@/enums/index'
 import { WorkspaceSchema } from '@/workspace'
 import { BaseProjectSchema } from '@/project'
 import { EnvironmentSchema } from '@/environment'
+import { EventSchema } from '@/event'
 
 export const IntegrationSchema = z.object({
   id: z.string(),
@@ -15,8 +20,44 @@ export const IntegrationSchema = z.object({
   type: integrationTypeEnum,
   notifyOn: z.array(eventTypeEnum),
   workspaceId: WorkspaceSchema.shape.id,
-  projectId: BaseProjectSchema.shape.id.nullable(),
-  environmentId: EnvironmentSchema.shape.id.nullable()
+  project: z
+    .object({
+      id: BaseProjectSchema.shape.id,
+      name: BaseProjectSchema.shape.name,
+      slug: BaseProjectSchema.shape.slug
+    })
+    .nullable(),
+  environments: z
+    .array(
+      z.object({
+        id: EnvironmentSchema.shape.id,
+        name: EnvironmentSchema.shape.name,
+        slug: EnvironmentSchema.shape.slug
+      })
+    )
+    .nullable(),
+  workspace: WorkspaceSchema,
+  lastUpdatedBy: z.object({
+    id: z.string(),
+    name: z.string(),
+    profilePictureUrl: z.string().nullable()
+  }),
+  entitlements: z.object({
+    canUpdate: z.boolean(),
+    canDelete: z.boolean()
+  })
+})
+
+export const IntegrationRunSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  duration: z.number(),
+  triggeredAt: z.string().datetime(),
+  logs: z.string().optional(),
+  status: integrationRunStatusEnum,
+  event: EventSchema,
+  eventId: EventSchema.shape.id,
+  integrationId: IntegrationSchema.shape.id
 })
 
 export const CreateIntegrationRequestSchema = z.object({
@@ -26,19 +67,19 @@ export const CreateIntegrationRequestSchema = z.object({
   type: IntegrationSchema.shape.type,
   notifyOn: IntegrationSchema.shape.notifyOn.min(1).optional(),
   metadata: z.record(z.string()),
-  environmentSlug: EnvironmentSchema.shape.slug.optional()
+  environmentSlugs: z.array(EnvironmentSchema.shape.slug.optional()),
+  privateKey: z.string().optional()
 })
 
 export const CreateIntegrationResponseSchema = IntegrationSchema
 
-export const UpdateIntegrationRequestSchema =
-  CreateIntegrationRequestSchema.partial()
-    .omit({
-      workspaceSlug: true
-    })
-    .extend({
-      integrationSlug: IntegrationSchema.shape.slug
-    })
+export const UpdateIntegrationRequestSchema = z.object({
+  integrationSlug: IntegrationSchema.shape.slug,
+  name: z.string().optional(),
+  notifyOn: IntegrationSchema.shape.notifyOn.optional(),
+  metadata: z.record(z.string()).optional(),
+  environmentSlugs: z.array(EnvironmentSchema.shape.slug).optional()
+})
 
 export const UpdateIntegrationResponseSchema = IntegrationSchema
 
@@ -52,9 +93,7 @@ export const GetIntegrationRequestSchema = z.object({
   integrationSlug: IntegrationSchema.shape.slug
 })
 
-export const GetIntegrationResponseSchema = IntegrationSchema.extend({
-  workspace: WorkspaceSchema
-})
+export const GetIntegrationResponseSchema = IntegrationSchema
 
 export const GetAllIntegrationRequestSchema = PageRequestSchema.extend({
   workspaceSlug: WorkspaceSchema.shape.slug
@@ -62,3 +101,45 @@ export const GetAllIntegrationRequestSchema = PageRequestSchema.extend({
 
 export const GetAllIntegrationResponseSchema =
   PageResponseSchema(IntegrationSchema)
+
+export const GetAllIntegrationRunsRequestSchema = PageRequestSchema.extend({
+  integrationSlug: IntegrationSchema.shape.slug
+})
+
+export const GetAllIntegrationRunsResponseSchema =
+  PageResponseSchema(IntegrationRunSchema)
+
+const ValidateIntegrationConfigurationCreateRequestSchema =
+  CreateIntegrationRequestSchema.extend({
+    isCreate: z.literal(true)
+  })
+
+const ValidateIntegrationConfigurationUpdateRequestSchema =
+  UpdateIntegrationRequestSchema.extend({
+    isCreate: z.literal(false),
+    integrationSlug: IntegrationSchema.shape.slug
+  })
+
+export const ValidateIntegrationConfigurationRequestSchema =
+  z.discriminatedUnion('isCreate', [
+    ValidateIntegrationConfigurationCreateRequestSchema,
+    ValidateIntegrationConfigurationUpdateRequestSchema
+  ])
+
+export const ValidateIntegrationConfigurationResponseSchema = z.object({
+  success: z.literal(true)
+})
+
+export const GetVercelEnvironmentsRequestSchema = z.object({
+  token: z.string(),
+  projectId: z.string()
+})
+
+export const GetVercelEnvironmentsResponseSchema = z.record(
+  z.object({
+    vercelSystemEnvironment: z
+      .enum(['production', 'preview', 'development'])
+      .optional(),
+    vercelCustomEnvironmentId: z.string().optional()
+  })
+)

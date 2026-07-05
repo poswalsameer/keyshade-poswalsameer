@@ -69,7 +69,7 @@ export default function EditRoleSheet() {
   const [editRoleData, setEditRoleData] = useState({
     name: selectedRole?.name ?? '',
     description: selectedRole?.description ?? '',
-    colorCode: selectedRole?.colorCode ?? '#000000'
+    colorCode: selectedRole?.authorities.includes('WORKSPACE_ADMIN') ? COLORS_LIST[2].color : (selectedRole?.colorCode || '#000000')
   })
 
   useEffect(() => {
@@ -83,7 +83,7 @@ export default function EditRoleSheet() {
         }
       }
 
-      setProjectEnvironmentSelection(selections)
+    setProjectEnvironmentSelection(selections)
     }
   }, [selectedRole])
 
@@ -179,17 +179,18 @@ export default function EditRoleSheet() {
           </SheetDescription>
         </SheetHeader>
         <div className="flex flex-col gap-y-8">
-          <div className="flex h-full w-full flex-col gap-[1rem] py-[1rem] ">
+          <div className="flex h-full w-full flex-col gap-4 py-4 ">
             {/* NAME */}
-            <div className="flex h-[2.25rem] w-full items-center justify-start gap-[1rem]">
+            <div className="flex h-9 w-full items-center justify-start gap-4">
               <Label
-                className="font-geist h-[1.25rem] w-[7rem] gap-[0.25rem] text-left text-[0.875rem] font-[500] "
+                className="font-geist h-5 w-28 gap-1 text-left text-[0.875rem] font-medium "
                 htmlFor="name"
               >
                 Name
               </Label>
               <Input
-                className="col-span-3 h-[2.25rem] w-[20rem] "
+                className="col-span-3 h-9 w-[20rem] "
+                disabled={selectedRole?.authorities.includes('WORKSPACE_ADMIN')}
                 id="name"
                 onChange={(e) =>
                   setEditRoleData((prev) => ({
@@ -203,15 +204,15 @@ export default function EditRoleSheet() {
             </div>
 
             {/* DESCRIPTION */}
-            <div className="flex h-[5.625rem] w-full items-center justify-start gap-[1rem]">
+            <div className="flex h-22.5 w-full items-center justify-start gap-4">
               <Label
-                className="font-geist h-[1.25rem] w-[7rem] gap-[0.25rem] text-left text-[0.875rem] font-[500] "
+                className="font-geist h-5 w-28 gap-1 text-left text-[0.875rem] font-medium "
                 htmlFor="description"
               >
                 Description
               </Label>
               <Textarea
-                className="col-span-3 h-[5.625rem] w-[20rem] resize-none gap-[0.25rem]"
+                className="col-span-3 h-22.5 w-[20rem] resize-none gap-1"
                 id="description"
                 onChange={(e) =>
                   setEditRoleData((prev) => ({
@@ -225,9 +226,9 @@ export default function EditRoleSheet() {
             </div>
 
             {/* COLOR PICKER */}
-            <div className="flex h-[5.625rem] w-full items-center justify-start gap-[1rem]">
+            <div className="flex h-22.5 w-full items-center justify-start gap-4">
               <Label
-                className="font-geist h-[1.25rem] w-[7rem] gap-[0.25rem] text-left text-[0.875rem] font-[500] "
+                className="font-geist h-5 w-28 gap-1 text-left text-[0.875rem] font-medium "
                 htmlFor="color"
               >
                 Color
@@ -244,7 +245,7 @@ export default function EditRoleSheet() {
                   (color) => color.color === editRoleData.colorCode
                 ).toString()}
               >
-                <SelectTrigger className="h-[2.25rem] w-[20rem] rounded-[0.375rem] border-[0.013rem] border-white/10 bg-white/5">
+                <SelectTrigger className="h-9 w-[20rem] rounded-md border-[0.013rem] border-white/10 bg-white/5">
                   <SelectValue placeholder="Select color" />
                 </SelectTrigger>
                 <SelectContent className="border-[0.013rem] border-white/10 bg-neutral-800 text-white ">
@@ -269,6 +270,7 @@ export default function EditRoleSheet() {
 
             {/* Authority Selection */}
             <AuthoritySelector
+              isAdminRole={selectedRole?.authorities.includes('WORKSPACE_ADMIN')}
               parent="ROLES"
               selectedPermissions={selectedPermissions}
               setSelectedPermissions={setSelectedPermissions}
@@ -282,9 +284,9 @@ export default function EditRoleSheet() {
             />
           </div>
         </div>
-        <div className="flex h-[2.25rem] w-full justify-end">
+        <div className="flex h-9 w-full justify-end">
           <Button
-            className="font-inter h-[2.25rem] w-[8rem] rounded-[0.375rem] text-[0.875rem] font-[500]"
+            className="font-inter h-9 w-32 rounded-md text-[0.875rem] font-medium"
             disabled={isLoading}
             onClick={handleEditRole}
             variant="secondary"

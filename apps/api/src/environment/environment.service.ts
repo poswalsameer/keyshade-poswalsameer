@@ -15,12 +15,17 @@ import { CreateEnvironment } from './dto/create.environment/create.environment'
 import { UpdateEnvironment } from './dto/update.environment/update.environment'
 import { PrismaService } from '@/prisma/prisma.service'
 import { AuthorizationService } from '@/auth/service/authorization.service'
-import { paginate } from '@/common/paginate'
-import generateEntitySlug from '@/common/slug-generator'
+import { paginate, PaginatedResponse } from '@/common/paginate'
 import { createEvent } from '@/common/event'
 import { constructErrorBody, limitMaxItemsPerPage } from '@/common/util'
 import { AuthenticatedUser } from '@/user/user.types'
 import { TierLimitService } from '@/common/tier-limit.service'
+import SlugGenerator from '@/common/slug-generator.service'
+import { checkForDisabledWorkspace } from '@/common/workspace'
+import { HydratedEnvironment } from './environment.types'
+import { InclusionQuery } from '@/common/inclusion-query'
+import { HydrationService } from '@/common/hydration.service'
+import { ProjectCacheService } from '@/cache/project-cache.service'
 
 @Injectable()
 export class EnvironmentService {
@@ -29,7 +34,10 @@ export class EnvironmentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly authorizationService: AuthorizationService,
-    private readonly tierLimitService: TierLimitService
+    private readonly tierLimitService: TierLimitService,
+    private readonly slugGenerator: SlugGenerator,
+    private readonly hydrationService: HydrationService,
+    private readonly projectCacheService: ProjectCacheService
   ) {}
 
   /**
@@ -61,7 +69,7 @@ export class EnvironmentService {
     user: AuthenticatedUser,
     dto: CreateEnvironment,
     projectSlug: Project['slug']
-  ) {
+  ): Promise<HydratedEnvironment> {
     this.logger.log(
       `User ${user.id} attempted to create environment ${dto.name} in project ${projectSlug}`
     )
@@ -70,7 +78,7 @@ export class EnvironmentService {
     const project =
       await this.authorizationService.authorizeUserAccessToProject({
         user,
-        entity: { slug: projectSlug },
+        slug: projectSlug,
         authorities: [
           Authority.CREATE_ENVIRONMENT,
           Authority.READ_ENVIRONMENT,
@@ -78,6 +86,12 @@ export class EnvironmentService {
         ]
       })
     const projectId = project.id
+
+    await checkForDisabledWorkspace(
+      project.workspaceId,
+      this.prisma,
+      `User ${user.id} attempted to create environment ${dto.name} in disabled workspace ${project.workspaceId}`
+    )
 
     // Check if more environments can be created in the project
     await this.tierLimitService.checkEnvironmentLimitReached(project)
@@ -89,10 +103,16 @@ export class EnvironmentService {
     this.logger.log(
       `Creating environment ${dto.name} in project ${project.name}`
     )
+
+    const environmentSlug = await this.slugGenerator.generateEntitySlug(
+      dto.name,
+      'ENVIRONMENT'
+    )
+
     const environment = await this.prisma.environment.create({
       data: {
         name: dto.name,
-        slug: await generateEntitySlug(dto.name, 'ENVIRONMENT', this.prisma),
+        slug: environmentSlug,
         description: dto.description,
         project: {
           connect: {
@@ -105,17 +125,9 @@ export class EnvironmentService {
           }
         }
       },
-      include: {
-        lastUpdatedBy: {
-          select: {
-            id: true,
-            name: true,
-            profilePictureUrl: true,
-            email: true
-          }
-        }
-      }
+      include: InclusionQuery.Environment
     })
+
     this.logger.log(
       `Environment ${environment.name} (${environment.slug}) created in project ${project.name}`
     )
@@ -138,7 +150,17 @@ export class EnvironmentService {
       this.prisma
     )
 
-    return environment
+    await this.projectCacheService.addEnvironmentToProjectCache(
+      environment.project.slug,
+      environment
+    )
+
+    const hydratedEnvironment = await this.hydrationService.hydrateEnvironment({
+      environment,
+      user
+    })
+    delete hydratedEnvironment.project
+    return hydratedEnvironment
   }
 
   /**
@@ -170,7 +192,7 @@ export class EnvironmentService {
     user: AuthenticatedUser,
     dto: UpdateEnvironment,
     environmentSlug: Environment['slug']
-  ) {
+  ): Promise<HydratedEnvironment> {
     this.logger.log(
       `User ${user.id} attempted to update environment ${environmentSlug}`
     )
@@ -178,7 +200,7 @@ export class EnvironmentService {
     const environment =
       await this.authorizationService.authorizeUserAccessToEnvironment({
         user,
-        entity: { slug: environmentSlug },
+        slug: environmentSlug,
         authorities: [
           Authority.UPDATE_ENVIRONMENT,
           Authority.READ_ENVIRONMENT,
@@ -198,11 +220,12 @@ export class EnvironmentService {
       data: {
         name: dto.name,
         slug: dto.name
-          ? await generateEntitySlug(dto.name, 'ENVIRONMENT', this.prisma)
+          ? await this.slugGenerator.generateEntitySlug(dto.name, 'ENVIRONMENT')
           : environment.slug,
         description: dto.description,
         lastUpdatedById: user.id
-      }
+      },
+      include: InclusionQuery.Environment
     })
     this.logger.log(`Environment ${updatedEnvironment.slug} updated`)
 
@@ -225,7 +248,12 @@ export class EnvironmentService {
       this.prisma
     )
 
-    return updatedEnvironment
+    const hydratedEnvironment = await this.hydrationService.hydrateEnvironment({
+      environment: updatedEnvironment,
+      user
+    })
+    delete hydratedEnvironment.project
+    return hydratedEnvironment
   }
 
   /**
@@ -244,7 +272,7 @@ export class EnvironmentService {
   async getEnvironment(
     user: AuthenticatedUser,
     environmentSlug: Environment['slug']
-  ) {
+  ): Promise<HydratedEnvironment> {
     this.logger.log(
       `User ${user.id} attempted to fetch an environment ${environmentSlug}`
     )
@@ -253,7 +281,7 @@ export class EnvironmentService {
     const environment =
       await this.authorizationService.authorizeUserAccessToEnvironment({
         user,
-        entity: { slug: environmentSlug },
+        slug: environmentSlug,
         authorities: [Authority.READ_ENVIRONMENT]
       })
     this.logger.log(`Environment ${environmentSlug} fetched`)
@@ -301,7 +329,7 @@ export class EnvironmentService {
     sort: string,
     order: string,
     search: string
-  ) {
+  ): Promise<PaginatedResponse<HydratedEnvironment>> {
     this.logger.log(
       `User ${user.id} attempted to fetch environments of project ${projectSlug}`
     )
@@ -310,7 +338,7 @@ export class EnvironmentService {
     const project =
       await this.authorizationService.authorizeUserAccessToProject({
         user,
-        entity: { slug: projectSlug },
+        slug: projectSlug,
         authorities: [Authority.READ_ENVIRONMENT]
       })
     this.logger.log(`Project ${projectSlug} fetched`)
@@ -318,7 +346,7 @@ export class EnvironmentService {
 
     // Get the environments for the required page
     this.logger.log(`Fetching environments of project ${projectSlug}`)
-    const items = await this.prisma.environment.findMany({
+    const environments = await this.prisma.environment.findMany({
       where: {
         projectId,
         name: {
@@ -326,33 +354,49 @@ export class EnvironmentService {
         }
       },
       select: {
-        id: true,
-        name: true,
-        slug: true,
-        description: true,
-        createdAt: true,
-        updatedAt: true,
-        lastUpdatedBy: {
-          select: {
-            id: true,
-            email: true,
-            profilePictureUrl: true,
-            name: true
-          }
-        }
-      },
-      skip: page * limit,
-      take: limitMaxItemsPerPage(limit),
-      orderBy: {
-        [sort]: order
+        slug: true
       }
     })
     this.logger.log(
-      `Environments of project ${projectSlug} fetched. Count: ${items.length}`
+      `Environments of project ${projectSlug} fetched. Count: ${environments.length}`
     )
 
+    const hydratedEnvironments: HydratedEnvironment[] = []
+    for (const environment of environments) {
+      try {
+        const hydratedEnvironment =
+          await this.authorizationService.authorizeUserAccessToEnvironment({
+            user,
+            slug: environment.slug,
+            authorities: [Authority.READ_ENVIRONMENT]
+          })
+        delete hydratedEnvironment.project
+        hydratedEnvironments.push(hydratedEnvironment)
+      } catch (_ignored) {}
+    }
+    this.logger.log(
+      `Hydrated ${hydratedEnvironments.length} environments of project ${projectSlug}`
+    )
+
+    // Apply pagination on the environments
+    this.logger.log(
+      `Applying pagination to environments of project ${projectSlug}`
+    )
+    const paginatedEnvironments = hydratedEnvironments
+      .filter((environment) =>
+        search
+          ? environment.name.toLowerCase().includes(search.toLowerCase())
+          : true
+      )
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .slice(page * limit, (page + 1) * limit)
+      .map((environment) => {
+        delete environment.project
+        return environment
+      })
+
     // Parse the secret and variable counts for each environment
-    for (const environment of items) {
+    for (const environment of hydratedEnvironments) {
       const secretCount = await this.getSecretCount(environment.id)
       const variableCount = await this.getVariableCount(environment.id)
       environment['secrets'] = secretCount
@@ -363,14 +407,7 @@ export class EnvironmentService {
     this.logger.log(
       `Calculating metadata for environments of project ${projectSlug}`
     )
-    const totalCount = await this.prisma.environment.count({
-      where: {
-        projectId,
-        name: {
-          contains: search
-        }
-      }
-    })
+    const totalCount = hydratedEnvironments.length
     const metadata = paginate(totalCount, `/environment/all/${projectSlug}`, {
       page,
       limit: limitMaxItemsPerPage(limit),
@@ -382,7 +419,7 @@ export class EnvironmentService {
       `Metadata calculated for environments of project ${projectSlug}`
     )
 
-    return { items, metadata }
+    return { items: paginatedEnvironments, metadata }
   }
 
   /**
@@ -414,7 +451,7 @@ export class EnvironmentService {
     const environment =
       await this.authorizationService.authorizeUserAccessToEnvironment({
         user,
-        entity: { slug: environmentSlug },
+        slug: environmentSlug,
         authorities: [Authority.DELETE_ENVIRONMENT]
       })
     this.logger.log(`Environment ${environmentSlug} fetched`)
@@ -448,6 +485,11 @@ export class EnvironmentService {
     })
     this.logger.log(`Environment ${environmentSlug} deleted`)
 
+    await this.projectCacheService.removeEnvironmentFromProjectCache(
+      environment.project.slug,
+      environment.id
+    )
+
     await createEvent(
       {
         triggeredBy: user,
@@ -471,7 +513,13 @@ export class EnvironmentService {
    * @throws ConflictException if an environment with the given name already exists
    * @private
    */
-  private async environmentExists(name: Environment['name'], project: Project) {
+  private async environmentExists(
+    name: Environment['name'],
+    project: {
+      id: Project['id']
+      slug: Project['slug']
+    }
+  ) {
     this.logger.log(
       `Checking if environment ${name} exists in project ${project.slug}`
     )
@@ -488,10 +536,14 @@ export class EnvironmentService {
         }
       })) !== null
     ) {
-      const errorMessage = `Environment with name ${name} already exists in project ${slug}`
-      this.logger.error(errorMessage)
+      this.logger.error(
+        `Environment with name ${name} already exists in project ${slug}`
+      )
       throw new ConflictException(
-        constructErrorBody('Environment exists', errorMessage)
+        constructErrorBody(
+          'Environment exists',
+          'An environment with this name already exists in this project. Please choose a different name.'
+        )
       )
     }
 

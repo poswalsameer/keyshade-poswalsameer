@@ -1,66 +1,74 @@
-import React, { useState } from 'react'
-import { AddSVG, EyeOpenSVG, EyeSlashSVG, TrashSVG } from '@public/svg/shared'
+import React from 'react'
+import { Info, Plus } from 'lucide-react'
+import { useAtomValue } from 'jotai'
+import { TrashSVG } from '@public/svg/shared'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { HiddenContent } from '@/components/shared/dashboard/hidden-content'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger
+} from '@/components/ui/tooltip'
+import { privateKeyStorageTypeAtom } from '@/store'
 
 interface LocalKeySetupProps {
   privateKey: string | null
-  isStoredOnServer: boolean
   onOpenSetupDialog: () => void
   onDelete: () => void
 }
 
 function LocalKeySetup({
   privateKey,
-  isStoredOnServer,
   onOpenSetupDialog,
   onDelete
 }: LocalKeySetupProps): React.JSX.Element {
-  const [isRevealed, setIsRevealed] = useState<boolean>(false)
+  const privateKeyStorageType = useAtomValue(privateKeyStorageTypeAtom)
+  const isPrivateKeyStored = privateKeyStorageType === 'IN_ATOM'
 
-  const handleToggleReveal = () => setIsRevealed((prev) => !prev)
-
-  if (privateKey && !isStoredOnServer) {
-    return (
-      <div className="flex gap-1">
-        <Input
-          className="px-4 py-6"
-          readOnly
-          type="text"
-          value={
-            isRevealed
-              ? privateKey
-              : privateKey.replace(/./g, '*').substring(0, 20)
-          }
-        />
-        <Button
-          className="flex items-center justify-center bg-neutral-800 px-4 py-6"
-          onClick={handleToggleReveal}
-          type="button"
-        >
-          {isRevealed ? <EyeSlashSVG /> : <EyeOpenSVG />}
-        </Button>
-        <Button
-          className="flex items-center justify-center bg-neutral-800 px-4 py-6"
-          onClick={onDelete}
-          type="button"
-        >
-          <TrashSVG />
-        </Button>
-      </div>
-    )
-  }
   return (
-    <Button
-      className="w-fit px-4 py-6"
-      disabled={Boolean(privateKey !== null && isStoredOnServer)}
-      onClick={onOpenSetupDialog}
-      type="button"
-      variant="secondary"
+    <div
+      className={`flex items-center justify-between gap-2 rounded-lg bg-white/10 p-3 ${isPrivateKeyStored && 'flex-col gap-3'}`}
     >
-      <AddSVG />
-      <div className="font-bold">Setup Private Key</div>
-    </Button>
+      <div>
+        <h1 className="flex items-center gap-2 text-lg font-medium text-white">
+          Do you wanna setup private key?{' '}
+          <Tooltip>
+            <TooltipTrigger>
+              <Info className="inline h-5 w-5 text-white/70" />
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="max-w-52 bg-white/10 text-center text-sm text-black">
+                Settings up your private key in browser helps you with safely
+                setting up your secret.
+              </p>
+            </TooltipContent>
+          </Tooltip>
+        </h1>
+      </div>
+      {isPrivateKeyStored ? (
+        <div className="flex items-center justify-between gap-1">
+          <HiddenContent isPrivateKey value={privateKey!} />
+          <Button
+            className="flex items-center justify-center bg-neutral-800 p-2"
+            onClick={onDelete}
+            type="button"
+          >
+            <TrashSVG />
+          </Button>
+        </div>
+      ) : (
+        <Button
+          className="flex w-fit items-center gap-1 rounded-md bg-neutral-800 px-3 py-5 text-sm text-white/70"
+          disabled={Boolean(privateKeyStorageType === 'IN_DB')}
+          onClick={onOpenSetupDialog}
+          type="button"
+          variant="default"
+        >
+          <Plus />
+          <div className="font-bold">Setup Private Key</div>
+        </Button>
+      )}
+    </div>
   )
 }
 

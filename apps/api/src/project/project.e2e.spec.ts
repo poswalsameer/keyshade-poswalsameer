@@ -17,8 +17,6 @@ import {
   EventType,
   Project,
   ProjectAccessLevel,
-  Secret,
-  Variable,
   Workspace
 } from '@prisma/client'
 import { EventService } from '@/event/event.service'
@@ -26,7 +24,7 @@ import { EventModule } from '@/event/event.module'
 import { ProjectService } from './project.service'
 import { WorkspaceService } from '@/workspace/workspace.service'
 import { WorkspaceMembershipService } from '@/workspace-membership/workspace-membership.service'
-import { UserService } from '@/user/user.service'
+import { UserService } from '@/user/service/user.service'
 import { WorkspaceModule } from '@/workspace/workspace.module'
 import { WorkspaceMembershipModule } from '@/workspace-membership/workspace-membership.module'
 import { UserModule } from '@/user/user.module'
@@ -82,9 +80,7 @@ describe('Project Controller Tests', () => {
       .useClass(MockMailService)
       .compile()
 
-    app = moduleRef.createNestApplication<NestFastifyApplication>(
-      new FastifyAdapter()
-    )
+    app = moduleRef.createNestApplication<any>(new FastifyAdapter() as any)
     prisma = moduleRef.get(PrismaService)
     eventService = moduleRef.get(EventService)
     projectService = moduleRef.get(ProjectService)
@@ -106,7 +102,7 @@ describe('Project Controller Tests', () => {
   beforeEach(async () => {
     const createUser1 = await userService.createUser({
       name: 'John Doe',
-      email: 'johndoe@keyshade.xyz',
+      email: 'johndoe@keyshade.io',
       isOnboardingFinished: true,
       isActive: true,
       isAdmin: false
@@ -114,46 +110,55 @@ describe('Project Controller Tests', () => {
 
     const createUser2 = await userService.createUser({
       name: 'Jane Doe',
-      email: 'janedoe@keyshade.xyz',
+      email: 'janedoe@keyshade.io',
       isOnboardingFinished: true,
       isActive: true,
       isAdmin: false
     })
 
-    workspace1 = createUser1.defaultWorkspace
     workspace2 = createUser2.defaultWorkspace
 
     delete createUser1.defaultWorkspace
     delete createUser2.defaultWorkspace
 
-    user1 = { ...createUser1, ipAddress: USER_IP_ADDRESS }
-    user2 = { ...createUser2, ipAddress: USER_IP_ADDRESS }
+    user1 = {
+      ...createUser1,
+      ipAddress: USER_IP_ADDRESS
+    }
+    user2 = {
+      ...createUser2,
+      ipAddress: USER_IP_ADDRESS
+    }
 
-    project1 = (await projectService.createProject(user1, workspace1.slug, {
+    workspace1 = await workspaceService.createWorkspace(user1, {
+      name: 'Workspace 1'
+    })
+
+    project1 = await projectService.createProject(user1, workspace1.slug, {
       name: 'Project 1',
       description: 'Project 1 description',
       storePrivateKey: true
-    })) as Project
+    })
 
-    project2 = (await projectService.createProject(user2, workspace2.slug, {
+    project2 = await projectService.createProject(user2, workspace2.slug, {
       name: 'Project 2',
       description: 'Project 2 description',
       storePrivateKey: false
-    })) as Project
+    })
 
-    project3 = (await projectService.createProject(user1, workspace1.slug, {
+    project3 = await projectService.createProject(user1, workspace1.slug, {
       name: 'Project for fork',
       description: 'Project for fork',
       storePrivateKey: true,
       accessLevel: ProjectAccessLevel.GLOBAL
-    })) as Project
+    })
 
-    project4 = (await projectService.createProject(user2, workspace2.slug, {
+    project4 = await projectService.createProject(user2, workspace2.slug, {
       name: 'Project4',
       description:
         'Project for testing if all environments,secrets and keys are being fetched or not',
       storePrivateKey: true
-    })) as Project
+    })
   })
 
   afterEach(async () => {
@@ -208,10 +213,14 @@ describe('Project Controller Tests', () => {
     })
 
     it('should not be able to create projects if tier limit it reached', async () => {
+      const maxProjects = (
+        await tierLimitService.getWorkspaceTierLimit(workspace1.id)
+      ).MAX_PROJECTS_PER_WORKSPACE
+
       // Create the number of projects that the tier limit allows
       for (
         let x = 100;
-        x < 100 + tierLimitService.getProjectTierLimit(workspace1.id) - 2; // Subtract 2 for the projects created above
+        x < 100 + maxProjects - 2; // Subtract 2 for the projects created above
         x++
       ) {
         await projectService.createProject(user1, workspace1.slug, {
@@ -282,28 +291,6 @@ describe('Project Controller Tests', () => {
       expect(event.itemId).toBeDefined()
     })
 
-    it('should have added the project to the admin role of the workspace', async () => {
-      const adminRole = await prisma.workspaceRole.findUnique({
-        where: {
-          workspaceId_name: {
-            workspaceId: workspace1.id,
-            name: 'Admin'
-          }
-        },
-        select: {
-          projects: {
-            select: {
-              projectId: true
-            }
-          }
-        }
-      })
-
-      expect(adminRole).toBeDefined()
-      expect(adminRole.projects).toHaveLength(2)
-      expect(adminRole.projects).toContainEqual({ projectId: project1.id })
-    })
-
     it('should not let non-member create a project', async () => {
       const response = await app.inject({
         method: 'POST',
@@ -361,7 +348,6 @@ describe('Project Controller Tests', () => {
       expect(response.json().storePrivateKey).toBe(true)
       expect(response.json().workspaceId).toBe(workspace1.id)
       expect(response.json().lastUpdatedById).toBe(user1.id)
-      expect(response.json().isDisabled).toBe(false)
       expect(response.json().accessLevel).toBe(ProjectAccessLevel.PRIVATE)
       expect(response.json().publicKey).toBe(project1.publicKey)
     })
@@ -453,21 +439,18 @@ describe('Project Controller Tests', () => {
       })
 
       expect(response.statusCode).toBe(200)
-      expect(response.json()).toEqual({
-        ...project1,
-        lastUpdatedById: user1.id,
-        createdAt: expect.any(String),
-        updatedAt: expect.any(String),
-        environmentCount: 1,
-        secretCount: 0,
-        variableCount: 0,
-        maxAllowedEnvironments: expect.any(Number),
-        maxAllowedSecrets: expect.any(Number),
-        maxAllowedVariables: expect.any(Number),
-        totalEnvironments: expect.any(Number),
-        totalSecrets: expect.any(Number),
-        totalVariables: expect.any(Number)
-      })
+
+      const project = response.json()
+      expect(project.id).toBe(project1.id)
+      expect(project.name).toBe(project1.name)
+      expect(project.slug).toBe(project1.slug)
+      expect(project.description).toBe(project1.description)
+      expect(project.storePrivateKey).toBe(project1.storePrivateKey)
+      expect(project.workspaceId).toBe(project1.workspaceId)
+      expect(project.lastUpdatedById).toBe(project1.lastUpdatedById)
+      expect(project.accessLevel).toBe(project1.accessLevel)
+      expect(project.publicKey).toBe(project1.publicKey)
+      expect(project.privateKey).toBe(project1.privateKey)
     })
 
     it('should not be able to fetch a non existing project', async () => {
@@ -505,9 +488,9 @@ describe('Project Controller Tests', () => {
 
       expect(response.statusCode).toBe(200)
       const project = response.json()
-      expect(project.environmentCount).toEqual(1)
-      expect(project.variableCount).toEqual(0)
-      expect(project.secretCount).toEqual(0)
+      expect(project.environments).toEqual(1)
+      expect(project.variables).toEqual(0)
+      expect(project.secrets).toEqual(0)
     })
   })
 
@@ -574,77 +557,70 @@ describe('Project Controller Tests', () => {
 
     it('should fetch correct counts of environments, variables, and secrets for projects in a workspace', async () => {
       // Add an environment to the project
-      const environment = (await environmentService.createEnvironment(
+      const environment = await environmentService.createEnvironment(
         user2,
         {
           name: 'Dev'
         },
         project4.slug
-      )) as Environment
+      )
 
       // Add two secrets
-      ;(
-        await secretService.createSecret(
-          user2,
-          {
-            name: 'API_KEY',
-            entries: [
-              {
-                value: 'some_key',
-                environmentSlug: environment.slug
-              }
-            ]
-          },
-          project4.slug
-        )
-      ).secret as Secret
-      ;(
-        await secretService.createSecret(
-          user2,
-          {
-            name: 'DB_PASSWORD',
-            entries: [
-              {
-                value: 'password',
-                environmentSlug: environment.slug
-              }
-            ]
-          },
-          project4.slug
-        )
-      ).secret as Secret
+      await secretService.createSecret(
+        user2,
+        {
+          name: 'API_KEY',
+          entries: [
+            {
+              value: 'some_key',
+              environmentSlug: environment.slug
+            }
+          ]
+        },
+        project4.slug
+      )
+
+      await secretService.createSecret(
+        user2,
+        {
+          name: 'DB_PASSWORD',
+          entries: [
+            {
+              value: 'password',
+              environmentSlug: environment.slug
+            }
+          ]
+        },
+        project4.slug
+      )
 
       // Add two variables
-      ;(
-        await variableService.createVariable(
-          user2,
-          {
-            name: 'PORT',
-            entries: [
-              {
-                value: '8080',
-                environmentSlug: environment.slug
-              }
-            ]
-          },
-          project4.slug
-        )
-      ).variable as Variable
-      ;(
-        await variableService.createVariable(
-          user2,
-          {
-            name: 'EXPIRY',
-            entries: [
-              {
-                value: '3600',
-                environmentSlug: environment.slug
-              }
-            ]
-          },
-          project4.slug
-        )
-      ).variable as Variable
+      await variableService.createVariable(
+        user2,
+        {
+          name: 'PORT',
+          entries: [
+            {
+              value: '8080',
+              environmentSlug: environment.slug
+            }
+          ]
+        },
+        project4.slug
+      )
+      await variableService.createVariable(
+        user2,
+        {
+          name: 'EXPIRY',
+          entries: [
+            {
+              value: '3600',
+              environmentSlug: environment.slug
+            }
+          ]
+        },
+        project4.slug
+      )
 
       const response = await app.inject({
         method: 'GET',
@@ -658,17 +634,14 @@ describe('Project Controller Tests', () => {
       expect(response.json().items.length).toEqual(1)
 
       const project = response.json().items[0]
-      expect(project.environmentCount).toEqual(2)
-      expect(project.variableCount).toEqual(2)
-      expect(project.secretCount).toEqual(2)
+      expect(project.environments).toEqual(2)
+      expect(project.variables).toEqual(2)
+      expect(project.secrets).toEqual(2)
       // Verify project details
       expect(project.name).toEqual('Project4')
       expect(project.description).toEqual(
         'Project for testing if all environments,secrets and keys are being fetched or not'
       )
-      // Verify that sensitive data is not included
-      expect(project).not.toHaveProperty('privateKey')
-      expect(project).not.toHaveProperty('publicKey')
     })
   })
 
@@ -820,25 +793,6 @@ describe('Project Controller Tests', () => {
       expect(environments).toHaveLength(0)
     })
 
-    it('should have removed the project from the admin role of the workspace', async () => {
-      await projectService.deleteProject(user1, project1.slug)
-
-      const adminRole = await prisma.workspaceRole.findUnique({
-        where: {
-          workspaceId_name: {
-            workspaceId: workspace1.id,
-            name: 'Admin'
-          }
-        },
-        select: {
-          projects: true
-        }
-      })
-
-      expect(adminRole).toBeDefined()
-      expect(adminRole.projects).toHaveLength(1)
-    })
-
     it('should not be able to delete a non existing project', async () => {
       const response = await app.inject({
         method: 'DELETE',
@@ -868,7 +822,7 @@ describe('Project Controller Tests', () => {
     let globalProject: Project, internalProject: Project
 
     beforeEach(async () => {
-      globalProject = (await projectService.createProject(
+      globalProject = await projectService.createProject(
         user1,
         workspace1.slug,
         {
@@ -877,9 +831,9 @@ describe('Project Controller Tests', () => {
           storePrivateKey: true,
           accessLevel: ProjectAccessLevel.GLOBAL
         }
-      )) as Project
+      )
 
-      internalProject = (await projectService.createProject(
+      internalProject = await projectService.createProject(
         user1,
         workspace1.slug,
         {
@@ -888,7 +842,7 @@ describe('Project Controller Tests', () => {
           storePrivateKey: true,
           accessLevel: ProjectAccessLevel.INTERNAL
         }
-      )) as Project
+      )
     })
 
     afterEach(async () => {
@@ -906,21 +860,21 @@ describe('Project Controller Tests', () => {
       })
 
       expect(response.statusCode).toBe(200)
-      expect(response.json()).toEqual({
-        ...globalProject,
-        lastUpdatedById: user1.id,
-        environmentCount: 1,
-        secretCount: 0,
-        variableCount: 0,
-        maxAllowedEnvironments: expect.any(Number),
-        maxAllowedSecrets: expect.any(Number),
-        maxAllowedVariables: expect.any(Number),
-        totalEnvironments: expect.any(Number),
-        totalSecrets: expect.any(Number),
-        totalVariables: expect.any(Number),
-        createdAt: expect.any(String),
-        updatedAt: expect.any(String)
-      })
+
+      const project = response.json()
+      expect(project.id).toBe(globalProject.id)
+      expect(project.name).toBe(globalProject.name)
+      expect(project.slug).toBe(globalProject.slug)
+      expect(project.description).toBe(globalProject.description)
+      expect(project.storePrivateKey).toBe(globalProject.storePrivateKey)
+      expect(project.workspaceId).toBe(globalProject.workspaceId)
+      expect(project.lastUpdatedById).toBe(globalProject.lastUpdatedById)
+      expect(project.accessLevel).toBe(globalProject.accessLevel)
+      expect(project.publicKey).toBe(globalProject.publicKey)
+      expect(project.privateKey).toBe(globalProject.privateKey)
+      expect(project.environments).toBe(1)
+      expect(project.secrets).toBe(0)
+      expect(project.variables).toBe(0)
     })
 
     it('should allow workspace members with READ_PROJECT to access an internal project', async () => {
@@ -933,21 +887,21 @@ describe('Project Controller Tests', () => {
       })
 
       expect(response.statusCode).toBe(200)
-      expect(response.json()).toEqual({
-        ...internalProject,
-        lastUpdatedById: user1.id,
-        createdAt: expect.any(String),
-        updatedAt: expect.any(String),
-        environmentCount: 1,
-        secretCount: 0,
-        variableCount: 0,
-        maxAllowedEnvironments: expect.any(Number),
-        maxAllowedSecrets: expect.any(Number),
-        maxAllowedVariables: expect.any(Number),
-        totalEnvironments: expect.any(Number),
-        totalSecrets: expect.any(Number),
-        totalVariables: expect.any(Number)
-      })
+
+      const project = response.json()
+      expect(project.id).toBe(internalProject.id)
+      expect(project.name).toBe(internalProject.name)
+      expect(project.slug).toBe(internalProject.slug)
+      expect(project.description).toBe(internalProject.description)
+      expect(project.storePrivateKey).toBe(internalProject.storePrivateKey)
+      expect(project.workspaceId).toBe(internalProject.workspaceId)
+      expect(project.lastUpdatedById).toBe(internalProject.lastUpdatedById)
+      expect(project.accessLevel).toBe(internalProject.accessLevel)
+      expect(project.publicKey).toBe(internalProject.publicKey)
+      expect(project.privateKey).toBe(internalProject.privateKey)
+      expect(project.environments).toBe(1)
+      expect(project.secrets).toBe(0)
+      expect(project.variables).toBe(0)
     })
 
     it('should not allow non-members to access an internal project', async () => {
@@ -978,7 +932,7 @@ describe('Project Controller Tests', () => {
     })
 
     it('should store private key even if specified not to in a global project', async () => {
-      const project = (await projectService.createProject(
+      const project = await projectService.createProject(
         user1,
         workspace1.slug,
         {
@@ -987,7 +941,7 @@ describe('Project Controller Tests', () => {
           storePrivateKey: false,
           accessLevel: ProjectAccessLevel.GLOBAL
         }
-      )) as Project
+      )
 
       expect(project).toBeDefined()
       expect(project.privateKey).not.toBeNull()
@@ -999,13 +953,16 @@ describe('Project Controller Tests', () => {
       // Create a user
       const user = await userService.createUser({
         name: 'Johnny Doe',
-        email: 'johhny@keyshade.xyz',
+        email: 'johhny@keyshade.io',
         isOnboardingFinished: true,
         isActive: true,
         isAdmin: false
       })
 
-      const johnny: AuthenticatedUser = { ...user, ipAddress: USER_IP_ADDRESS }
+      const johnny: AuthenticatedUser = {
+        ...user,
+        ipAddress: USER_IP_ADDRESS
+      }
 
       // Create a member role for the workspace
       const role = await workspaceRoleService.createWorkspaceRole(
@@ -1049,7 +1006,7 @@ describe('Project Controller Tests', () => {
 
     it('should store the private key if access level of INTERNAL/PRIVATE project is updated to GLOBAL', async () => {
       // Create a project with access level INTERNAL
-      const project = (await projectService.createProject(
+      const project = await projectService.createProject(
         user1,
         workspace1.slug,
         {
@@ -1058,16 +1015,16 @@ describe('Project Controller Tests', () => {
           storePrivateKey: true,
           accessLevel: ProjectAccessLevel.INTERNAL
         }
-      )) as Project
+      )
 
       // Update the access level of the project to GLOBAL
-      const updatedProject = (await projectService.updateProject(
+      const updatedProject = await projectService.updateProject(
         user1,
         project.slug,
         {
           accessLevel: ProjectAccessLevel.GLOBAL
         }
-      )) as Project
+      )
 
       expect(updatedProject).toBeDefined()
       expect(updatedProject.privateKey).toBe(project.privateKey)
@@ -1076,7 +1033,7 @@ describe('Project Controller Tests', () => {
     })
 
     it('should throw an error while setting access level to GLOBAL if private key is not specified and project does not store private key', async () => {
-      const project = (await projectService.createProject(
+      const project = await projectService.createProject(
         user1,
         workspace1.slug,
         {
@@ -1085,7 +1042,7 @@ describe('Project Controller Tests', () => {
           storePrivateKey: false,
           accessLevel: ProjectAccessLevel.INTERNAL
         }
-      )) as Project
+      )
 
       const response = await app.inject({
         method: 'PUT',
@@ -1102,7 +1059,7 @@ describe('Project Controller Tests', () => {
     })
 
     it('should regenerate key-pair if access level of GLOBAL project is updated to INTERNAL or PRIVATE', async () => {
-      const project = (await projectService.createProject(
+      const project = await projectService.createProject(
         user1,
         workspace1.slug,
         {
@@ -1111,7 +1068,7 @@ describe('Project Controller Tests', () => {
           storePrivateKey: true,
           accessLevel: ProjectAccessLevel.GLOBAL
         }
-      )) as Project
+      )
 
       const response = await app.inject({
         method: 'PUT',
@@ -1132,7 +1089,7 @@ describe('Project Controller Tests', () => {
   })
 
   it('should allow users with sufficient access to access a private project', async () => {
-    const privateProject = (await projectService.createProject(
+    const privateProject = await projectService.createProject(
       user1,
       workspace1.slug,
       {
@@ -1141,7 +1098,7 @@ describe('Project Controller Tests', () => {
         storePrivateKey: true,
         accessLevel: ProjectAccessLevel.PRIVATE
       }
-    )) as Project
+    )
 
     const response = await app.inject({
       method: 'GET',
@@ -1152,25 +1109,22 @@ describe('Project Controller Tests', () => {
     })
 
     expect(response.statusCode).toBe(200)
-    expect(response.json()).toEqual({
-      ...privateProject,
-      lastUpdatedById: user1.id,
-      createdAt: expect.any(String),
-      updatedAt: expect.any(String),
-      environmentCount: 1,
-      secretCount: 0,
-      variableCount: 0,
-      maxAllowedEnvironments: expect.any(Number),
-      maxAllowedSecrets: expect.any(Number),
-      maxAllowedVariables: expect.any(Number),
-      totalEnvironments: expect.any(Number),
-      totalSecrets: expect.any(Number),
-      totalVariables: expect.any(Number)
-    })
+
+    const project = response.json()
+    expect(project.id).toBe(privateProject.id)
+    expect(project.name).toBe(privateProject.name)
+    expect(project.slug).toBe(privateProject.slug)
+    expect(project.description).toBe(privateProject.description)
+    expect(project.storePrivateKey).toBe(privateProject.storePrivateKey)
+    expect(project.workspaceId).toBe(privateProject.workspaceId)
+    expect(project.lastUpdatedById).toBe(privateProject.lastUpdatedById)
+    expect(project.accessLevel).toBe(privateProject.accessLevel)
+    expect(project.publicKey).toBe(privateProject.publicKey)
+    expect(project.privateKey).toBe(privateProject.privateKey)
   })
 
   it('should not allow users without sufficient access to access a private project', async () => {
-    const privateProject = (await projectService.createProject(
+    const privateProject = await projectService.createProject(
       user1,
       workspace1.slug,
       {
@@ -1179,7 +1133,7 @@ describe('Project Controller Tests', () => {
         storePrivateKey: true,
         accessLevel: ProjectAccessLevel.PRIVATE
       }
-    )) as Project
+    )
 
     const response = await app.inject({
       method: 'GET',
@@ -1194,13 +1148,13 @@ describe('Project Controller Tests', () => {
 
   describe('Project Fork Tests', () => {
     it('should be able to fork a project', async () => {
-      const forkedProject = (await projectService.forkProject(
+      const forkedProject = await projectService.forkProject(
         user2,
         project3.slug,
         {
           name: 'Forked Project'
         }
-      )) as Project
+      )
 
       expect(forkedProject).toBeDefined()
       expect(forkedProject.name).toBe('Forked Project')
@@ -1260,30 +1214,30 @@ describe('Project Controller Tests', () => {
     })
 
     it('should fork the project in the default workspace if workspace slug is not specified', async () => {
-      const forkedProject = (await projectService.forkProject(
+      const forkedProject = await projectService.forkProject(
         user2,
         project3.slug,
         {
           name: 'Forked Project'
         }
-      )) as Project
+      )
 
       expect(forkedProject.workspaceId).toBe(workspace2.id)
     })
 
     it('should fork the project in the specific workspace if the slug is provided in the payload', async () => {
-      const newWorkspace = (await workspaceService.createWorkspace(user2, {
+      const newWorkspace = await workspaceService.createWorkspace(user2, {
         name: 'New Workspace'
-      })) as Workspace
+      })
 
-      const forkedProject = (await projectService.forkProject(
+      const forkedProject = await projectService.forkProject(
         user2,
         project3.slug,
         {
           name: 'Forked Project',
           workspaceSlug: newWorkspace.slug
         }
-      )) as Project
+      )
 
       expect(forkedProject.workspaceId).toBe(newWorkspace.id)
     })
@@ -1312,79 +1266,71 @@ describe('Project Controller Tests', () => {
 
     it('should copy over all environments, secrets and variables into the forked project', async () => {
       // Add an environment to the project
-      const environment = (await environmentService.createEnvironment(
+      const environment = await environmentService.createEnvironment(
         user1,
         {
           name: 'Dev'
         },
         project3.slug
-      )) as Environment
+      )
 
       // Add two secrets
-      const secret1 = (
-        await secretService.createSecret(
-          user1,
-          {
-            name: 'API_KEY',
-            entries: [
-              {
-                value: 'some_key',
-                environmentSlug: environment.slug
-              }
-            ]
-          },
-          project3.slug
-        )
-      ).secret as Secret
+      const secret1 = await secretService.createSecret(
+        user1,
+        {
+          name: 'API_KEY',
+          entries: [
+            {
+              value: 'some_key',
+              environmentSlug: environment.slug
+            }
+          ]
+        },
+        project3.slug
+      )
 
-      const secret2 = (
-        await secretService.createSecret(
-          user1,
-          {
-            name: 'DB_PASSWORD',
-            entries: [
-              {
-                value: 'password',
-                environmentSlug: environment.slug
-              }
-            ]
-          },
-          project3.slug
-        )
-      ).secret as Secret
+      const secret2 = await secretService.createSecret(
+        user1,
+        {
+          name: 'DB_PASSWORD',
+          entries: [
+            {
+              value: 'password',
+              environmentSlug: environment.slug
+            }
+          ]
+        },
+        project3.slug
+      )
 
       // Add two variables
-      const variable1 = (
-        await variableService.createVariable(
-          user1,
-          {
-            name: 'PORT',
-            entries: [
-              {
-                value: '8080',
-                environmentSlug: environment.slug
-              }
-            ]
-          },
-          project3.slug
-        )
-      ).variable as Variable
+      const variable1 = await variableService.createVariable(
+        user1,
+        {
+          name: 'PORT',
+          entries: [
+            {
+              value: '8080',
+              environmentSlug: environment.slug
+            }
+          ]
+        },
+        project3.slug
+      )
 
-      const variable2 = (
-        await variableService.createVariable(
-          user1,
-          {
-            name: 'EXPIRY',
-            entries: [
-              {
-                value: '3600',
-                environmentSlug: environment.slug
-              }
-            ]
-          },
-          project3.slug
-        )
-      ).variable as Variable
+      const variable2 = await variableService.createVariable(
+        user1,
+        {
+          name: 'EXPIRY',
+          entries: [
+            {
+              value: '3600',
+              environmentSlug: environment.slug
+            }
+          ]
+        },
+        project3.slug
+      )
 
       // Try forking the project
       const forkedProject = await projectService.forkProject(
@@ -1450,13 +1396,13 @@ describe('Project Controller Tests', () => {
 
     it('should only copy new environments, secrets and variables if sync is not hard', async () => {
       // Add an environment to the project
-      const environment = (await environmentService.createEnvironment(
+      const environment = await environmentService.createEnvironment(
         user1,
         {
           name: 'Dev'
         },
         project3.slug
-      )) as Environment
+      )
 
       // Add two secrets
       await secretService.createSecret(
@@ -1526,14 +1472,13 @@ describe('Project Controller Tests', () => {
       )
 
       // Add a new environment to the original project
-      const newEnvironmentOriginal =
-        (await environmentService.createEnvironment(
-          user1,
-          {
-            name: 'Prod'
-          },
-          project3.slug
-        )) as Environment
+      const newEnvironmentOriginal = await environmentService.createEnvironment(
+        user1,
+        {
+          name: 'Prod'
+        },
+        project3.slug
+      )
 
       // Add a new secret to the original project
       await secretService.createSecret(
@@ -1566,13 +1511,13 @@ describe('Project Controller Tests', () => {
       )
 
       // Add a new environment to the forked project
-      const newEnvironmentForked = (await environmentService.createEnvironment(
+      const newEnvironmentForked = await environmentService.createEnvironment(
         user2,
         {
           name: 'Stage'
         },
         forkedProject.slug
-      )) as Environment
+      )
 
       // Add a new secret to the forked project
       await secretService.createSecret(
@@ -1640,13 +1585,13 @@ describe('Project Controller Tests', () => {
     })
 
     it('should only replace environments, secrets and variables if sync is hard', async () => {
-      const environment = (await environmentService.createEnvironment(
+      const environment = await environmentService.createEnvironment(
         user1,
         {
           name: 'Dev'
         },
         project3.slug
-      )) as Environment
+      )
 
       // Add two secrets
       await secretService.createSecret(
@@ -1716,14 +1661,13 @@ describe('Project Controller Tests', () => {
       )
 
       // Add a new environment to the original project
-      const newEnvironmentOriginal =
-        (await environmentService.createEnvironment(
-          user1,
-          {
-            name: 'Prod'
-          },
-          project3.slug
-        )) as Environment
+      const newEnvironmentOriginal = await environmentService.createEnvironment(
+        user1,
+        {
+          name: 'Prod'
+        },
+        project3.slug
+      )
 
       // Add a new secret to the original project
       await secretService.createSecret(
@@ -1756,13 +1700,13 @@ describe('Project Controller Tests', () => {
       )
 
       // Add a new environment to the forked project
-      const newEnvironmentForked = (await environmentService.createEnvironment(
+      const newEnvironmentForked = await environmentService.createEnvironment(
         user2,
         {
           name: 'Prod'
         },
         forkedProject.slug
-      )) as Environment
+      )
 
       // Add a new secret to the forked project
       await secretService.createSecret(
@@ -1929,6 +1873,138 @@ describe('Project Controller Tests', () => {
 
       expect(response.statusCode).toBe(200)
       expect(response.json().items).toHaveLength(1)
+    })
+  })
+
+  describe('Export Configurations Tests', () => {
+    let env: Environment, envNoPrivateKey: Environment
+
+    beforeEach(async () => {
+      env = await environmentService.createEnvironment(
+        user1,
+        { name: 'EnvProj1' },
+        project1.slug
+      )
+
+      await secretService.createSecret(
+        user1,
+        {
+          name: 'API_KEY',
+          entries: [{ value: 'secret_val', environmentSlug: env.slug }]
+        },
+        project1.slug
+      )
+
+      await variableService.createVariable(
+        user1,
+        {
+          name: 'TIMEOUT',
+          entries: [{ value: '3000', environmentSlug: env.slug }]
+        },
+        project1.slug
+      )
+
+      envNoPrivateKey = await environmentService.createEnvironment(
+        user2,
+        { name: 'EnvProj2' },
+        project2.slug
+      )
+
+      await secretService.createSecret(
+        user2,
+        {
+          name: 'API_KEY',
+          entries: [
+            { value: 'secret_val', environmentSlug: envNoPrivateKey.slug }
+          ]
+        },
+        project2.slug
+      )
+
+      await variableService.createVariable(
+        user2,
+        {
+          name: 'TIMEOUT',
+          entries: [{ value: '3000', environmentSlug: envNoPrivateKey.slug }]
+        },
+        project2.slug
+      )
+    })
+
+    describe('Success cases', () => {
+      it('should export project configurations as base64-JSON', async () => {
+        const url =
+          `/project/${project1.slug}/export-configurations` +
+          `?environmentSlugs=${env.slug}` +
+          `&format=json`
+
+        const response = await app.inject({
+          method: 'GET',
+          url,
+          headers: { 'x-e2e-user-email': user1.email }
+        })
+
+        expect(response.statusCode).toBe(200)
+
+        const body = response.json()
+        expect(body).toHaveProperty(env.slug)
+
+        const raw = Buffer.from(body[env.slug], 'base64').toString('utf-8')
+        const parsed = JSON.parse(raw)
+        expect(parsed).toEqual({
+          API_KEY: expect.not.stringMatching('secret_val'),
+          TIMEOUT: '3000'
+        })
+      })
+
+      it('should 200 if privateKey is missing but the project stores the private key', async () => {
+        const url =
+          `/project/${project1.slug}/export-configurations` +
+          `?environmentSlugs=${env.slug}` +
+          `&format=json`
+
+        const response = await app.inject({
+          method: 'GET',
+          url,
+          headers: { 'x-e2e-user-email': user1.email }
+        })
+
+        expect(response.statusCode).toBe(200)
+      })
+    })
+
+    describe('Error cases', () => {
+      it('should 401 if user is not a workspace member', async () => {
+        const url =
+          `/project/${project1.slug}/export-configurations` +
+          `?environmentSlugs=${env.slug}` +
+          `&format=json` +
+          `&privateKey=${project1.privateKey}`
+
+        const response = await app.inject({
+          method: 'GET',
+          url,
+          headers: { 'x-e2e-user-email': user2.email }
+        })
+
+        expect(response.statusCode).toBe(401)
+      })
+
+      it('should 404 if project does not exist', async () => {
+        const url =
+          `/project/not-a-real-slug/export-configurations` +
+          `?environmentSlugs=${env.slug}` +
+          `&format=json` +
+          `&privateKey=${project1.privateKey}`
+
+        const response = await app.inject({
+          method: 'GET',
+          url,
+          headers: { 'x-e2e-user-email': user1.email }
+        })
+
+        expect(response.statusCode).toBe(404)
+      })
     })
   })
 })

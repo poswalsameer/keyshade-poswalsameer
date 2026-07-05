@@ -7,9 +7,13 @@ import {
   eventTriggererEnum,
   eventTypeEnum,
   expiresAfterEnum,
+  integrationRunStatusEnum,
   integrationTypeEnum,
   projectAccessLevelEnum,
-  rotateAfterEnum
+  rotateAfterEnum,
+  subscriptionCancellationReasonEnum,
+  subscriptionPlanEnum,
+  subscriptionStatusEnum
 } from '.'
 
 export type AuthorityEnum = z.infer<typeof authorityEnum>
@@ -31,3 +35,13 @@ export type ExpiresAfterEnum = z.infer<typeof expiresAfterEnum>
 export type IntegrationTypeEnum = z.infer<typeof integrationTypeEnum>
 
 export type AuthProviderEnum = z.infer<typeof authProviderEnum>
+
+export type IntegrationRunStatusEnum = z.infer<typeof integrationRunStatusEnum>
+
+export type SubscriptionPlanTypeEnum = z.infer<typeof subscriptionPlanEnum>
+
+export type SubscriptionStatusTypeEnum = z.infer<typeof subscriptionStatusEnum>
+
+export type SubscriptionCancellationReasonEnum = z.infer<
+  typeof subscriptionCancellationReasonEnum
+>

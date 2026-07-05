@@ -1,55 +1,69 @@
 import { useEffect, useState } from 'react'
-import { useAtom, useAtomValue } from 'jotai'
-import type { ProjectWithTierLimitAndCount } from '@keyshade/schema'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
+import type { GetAllProjectsResponse } from '@keyshade/schema'
 import {
   selectedProjectPrivateKeyAtom,
-  selectedProjectAtom,
-  localProjectPrivateKeyAtom
+  localProjectPrivateKeyAtom,
+  privateKeyStorageTypeAtom
 } from '@/store'
 
 export interface UseProjectPrivateKeyResult {
-  projectPrivateKey: ProjectWithTierLimitAndCount['privateKey'] | null
-  hasServerStoredKey: boolean
-  setHasServerStoredKey: React.Dispatch<React.SetStateAction<boolean>>
+  projectPrivateKey:
+    | GetAllProjectsResponse['items'][number]['privateKey']
+    | null
   loading: boolean
 }
+type PartialProject = Pick<
+  GetAllProjectsResponse['items'][number],
+  'slug' | 'storePrivateKey' | 'privateKey'
+>
 
-export function useProjectPrivateKey(): UseProjectPrivateKeyResult {
-  const [projectPrivateKey, setprojectPrivateKey] = useAtom(
+export function useProjectPrivateKey(
+  selectedProject: PartialProject | null
+): UseProjectPrivateKeyResult {
+  const [projectPrivateKey, setProjectPrivateKey] = useAtom(
     selectedProjectPrivateKeyAtom
   )
-  const selectedProject = useAtomValue(selectedProjectAtom)
   const localProjectPrivateKey = useAtomValue(localProjectPrivateKeyAtom)
-
-  const [hasServerStoredKey, setHasServerStoredKey] = useState<boolean>(false)
+  const setPrivateKeyStorageType = useSetAtom(privateKeyStorageTypeAtom)
   const [loading, setLoading] = useState<boolean>(true)
 
   useEffect(() => {
     setLoading(true)
     if (!selectedProject) {
-      setprojectPrivateKey(null)
-      setHasServerStoredKey(false)
+      setProjectPrivateKey(null)
+      setPrivateKeyStorageType('NONE')
+      setLoading(false)
       return
     }
-
     if (selectedProject.storePrivateKey && selectedProject.privateKey) {
-      setHasServerStoredKey(true)
-      setprojectPrivateKey(selectedProject.privateKey)
-    } else {
-      const localKey =
-        localProjectPrivateKey.find(
-          (pair) => pair.slug === selectedProject.slug
-        )?.key ?? null
-      setHasServerStoredKey(false)
-      setprojectPrivateKey(localKey)
+      setProjectPrivateKey(selectedProject.privateKey)
+      setPrivateKeyStorageType('IN_DB')
+      setLoading(false)
+      return
     }
+    const localKey =
+      localProjectPrivateKey.find((pair) => pair.slug === selectedProject.slug)
+        ?.key ?? null
+
+    if (localKey) {
+      setProjectPrivateKey(localKey)
+      setPrivateKeyStorageType('IN_ATOM')
+      setLoading(false)
+      return
+    }
+    setProjectPrivateKey(null)
+    setPrivateKeyStorageType('NONE')
     setLoading(false)
-  }, [selectedProject, localProjectPrivateKey, setprojectPrivateKey])
+  }, [
+    selectedProject,
+    localProjectPrivateKey,
+    setProjectPrivateKey,
+    setPrivateKeyStorageType
+  ])
 
   return {
     projectPrivateKey,
-    hasServerStoredKey,
-    setHasServerStoredKey,
     loading
   }
 }

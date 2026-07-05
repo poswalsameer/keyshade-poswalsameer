@@ -1,24 +1,26 @@
 import { InternalServerErrorException, Logger } from '@nestjs/common'
 import {
   Environment,
+  Event,
   EventSeverity,
+  EventSource,
   EventTriggerer,
   EventType,
-  EventSource,
-  PrismaClient,
+  Integration,
   Project,
   Secret,
   User,
-  Workspace,
-  WorkspaceRole,
   Variable,
-  Integration
+  Workspace,
+  WorkspaceRole
 } from '@prisma/client'
-import { JsonObject } from '@prisma/client/runtime/library'
-import IntegrationFactory from '@/integration/plugins/factory/integration.factory'
+import IntegrationFactory from '@/integration/plugins/integration.factory'
 import { EventService } from '@/event/event.service'
 import { AuthenticatedUser } from '@/user/user.types'
-import { constructErrorBody } from './util'
+import { constructErrorBody, encryptMetadata } from './util'
+import { PrismaService } from '@/prisma/prisma.service'
+import { EventMetadata } from '@/event/event.types'
+import { InclusionQuery } from './inclusion-query'
 
 /**
  * Creates a new event and saves it to the database.
@@ -46,10 +48,10 @@ export const createEvent = async (
     title: string
     workspaceId: string
     description?: string
-    metadata: JsonObject
+    metadata: EventMetadata
   },
-  prisma: PrismaClient
-): Promise<void> => {
+  prisma: PrismaService
+): Promise<Event> => {
   const logger = new Logger('CreateEvent')
 
   logger.log(`Creating event with type ${data.type}`)
@@ -62,6 +64,11 @@ export const createEvent = async (
     )
   }
 
+  const metadataToPersist = data.metadata
+  if (data.source === EventSource.SECRET) {
+    delete metadataToPersist.values
+  }
+
   const event = await prisma.event.create({
     data: {
       triggerer: data.triggerer ?? EventTriggerer.USER,
@@ -70,7 +77,7 @@ export const createEvent = async (
       source: data.source,
       title: data.title,
       description: data.description ?? '',
-      metadata: data.metadata,
+      metadata: encryptMetadata(metadataToPersist),
       userId: data.triggeredBy?.id,
       itemId: data.entity?.id,
       workspaceId: data.workspaceId
@@ -133,7 +140,11 @@ export const createEvent = async (
         OR: [
           {
             projectId,
-            environmentId,
+            environments: {
+              some: {
+                id: environmentId
+              }
+            },
             workspaceId: data.workspaceId
           },
           {
@@ -147,7 +158,8 @@ export const createEvent = async (
         notifyOn: {
           has: data.type
         }
-      }
+      },
+      include: InclusionQuery.Integration
     })
 
     logger.log(
@@ -159,22 +171,34 @@ export const createEvent = async (
       logger.log(
         `Emitting event for integration with id ${integration.id} and type ${integration.type}`
       )
+
       const integrationInstance = IntegrationFactory.createIntegration(
-        integration.type
+        integration,
+        prisma
       )
-      integrationInstance.emitEvent(
-        {
+
+      integrationInstance
+        .emitEvent({
           entity: data.entity,
           source: data.source,
           eventType: data.type,
           title: data.title,
-          description: data.description
-        },
-        integration.metadata
-      )
-      logger.log(`Event emitted for integration with id ${integration.id}`)
+          description: data.description,
+          event
+        })
+        .then(() => {
+          logger.log(
+            `Event emitted for integration with id ${integration.id} and type ${integration.type}`
+          )
+        })
+        .catch((error) => {
+          logger.error(
+            `Error emitting event for integration with id ${integration.id} and type ${integration.type}: ${error}`
+          )
+        })
     }
   }
+  return event
 }
 
 /**

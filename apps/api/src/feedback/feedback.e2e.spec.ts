@@ -11,27 +11,29 @@ import { FeedbackModule } from './feedback.module'
 import { MailModule } from '@/mail/mail.module'
 import { PrismaService } from '@/prisma/prisma.service'
 import { User } from '@prisma/client'
+import { UserService } from '@/user/service/user.service'
+import { UserModule } from '@/user/user.module'
 
 describe('Feedback Controller (E2E)', () => {
   let app: NestFastifyApplication
   let feedbackService: FeedbackService
   let mockMailService: MockMailService
+  let userService: UserService
   let prisma: PrismaService
   let user: User
 
   beforeAll(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
-      imports: [AppModule, FeedbackModule, MailModule]
+      imports: [AppModule, FeedbackModule, MailModule, UserModule]
     })
       .overrideProvider(MAIL_SERVICE)
       .useClass(MockMailService)
       .compile()
 
-    app = moduleRef.createNestApplication<NestFastifyApplication>(
-      new FastifyAdapter()
-    )
+    app = moduleRef.createNestApplication<any>(new FastifyAdapter() as any)
     feedbackService = moduleRef.get(FeedbackService)
     mockMailService = moduleRef.get(MAIL_SERVICE)
+    userService = moduleRef.get(UserService)
 
     prisma = moduleRef.get(PrismaService)
 
@@ -40,14 +42,12 @@ describe('Feedback Controller (E2E)', () => {
   })
 
   beforeEach(async () => {
-    user = await prisma.user.create({
-      data: {
-        email: 'janice@keyshade.xyz',
-        name: 'Janice',
-        isActive: true,
-        isAdmin: false,
-        isOnboardingFinished: false
-      }
+    user = await userService.createUser({
+      email: 'janice@keyshade.io',
+      name: 'Janice',
+      isActive: true,
+      isAdmin: false,
+      isOnboardingFinished: false
     })
   })
 

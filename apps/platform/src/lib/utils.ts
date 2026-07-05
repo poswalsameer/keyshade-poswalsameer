@@ -6,6 +6,7 @@ import type {
 } from '@keyshade/schema'
 import { type ClassValue, clsx } from 'clsx'
 import dayjs from 'dayjs'
+import { posthog } from 'posthog-js'
 import { twMerge } from 'tailwind-merge'
 
 export function cn(...inputs: ClassValue[]): string {
@@ -17,6 +18,7 @@ export function logout() {
   document.cookie =
     'isOnboardingFinished=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/'
   localStorage.clear()
+  posthog.reset()
   window.location.href = '/auth'
 }
 
@@ -24,8 +26,19 @@ export function formatDate(date: string): string {
   return dayjs(date).format('D MMMM, YYYY')
 }
 
+export function formatTime(date: string): string {
+  return dayjs(date).format('HH:mm')
+}
+
+export function formatText(type: string): string {
+  return type
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ')
+}
+
 export function parseUpdatedEnvironmentValues(
-  oldValues: Variable['values'],
+  oldValues: Variable['versions'] | SecretVersion[],
   newValues: Record<string, string>
 ): {
   value: string

@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
+import TableLoader from '../common/table-loader'
 import { cn } from '@/lib/utils'
 
 interface InfiniteScrollListResponse<T> {
   success: boolean
   data: {
     items: T[]
-    metadata?: { totalCount: number }
+    metadata?: { totalCount?: number }
   }
   error?: { message: string }
 }
@@ -21,6 +22,8 @@ interface InfiniteScrollListProps<T> {
   }) => Promise<InfiniteScrollListResponse<T>>
   className?: string
   inTable?: boolean
+  emptyComponent?: React.ReactNode
+  loadingComponent?: React.ReactNode
 }
 
 export function InfiniteScrollList<T>({
@@ -29,11 +32,12 @@ export function InfiniteScrollList<T>({
   itemsPerPage,
   fetchFunction,
   className = '',
-  inTable = false
+  inTable = false,
+  emptyComponent,
+  loadingComponent
 }: InfiniteScrollListProps<T>) {
   const [items, setItems] = useState<T[]>([])
   const [isLoading, setIsLoading] = useState<boolean>(false)
-  const [error, setError] = useState<string | null>(null)
 
   const pageRef = useRef<number>(0)
   const hasMoreRef = useRef<boolean>(true)
@@ -57,8 +61,9 @@ export function InfiniteScrollList<T>({
         page: currentPage,
         limit: itemsPerPage
       })
-      if (!success) throw new Error(err?.message || 'Fetch failed')
-
+      if (!success && err) {
+        return
+      }
       const fetched = data.items
       const total = data.metadata?.totalCount ?? 0
 
@@ -74,10 +79,7 @@ export function InfiniteScrollList<T>({
 
         return [...prev, ...newItems]
       })
-
-      setError(null)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unknown error')
       hasMoreRef.current = false
     } finally {
       loadingRef.current = false
@@ -87,7 +89,6 @@ export function InfiniteScrollList<T>({
 
   useEffect(() => {
     setItems([])
-    setError(null)
     pageRef.current = 0
     hasMoreRef.current = true
     loadingRef.current = false
@@ -121,29 +122,35 @@ export function InfiniteScrollList<T>({
 
   if (isLoading && items.length === 0) {
     return inTable ? (
-      <tr>
-        <td className="flex justify-center p-4" colSpan={3}>
-          <Loader2 className="h-5 w-5 animate-spin text-white/70" />
-        </td>
-      </tr>
+      <>
+          {loadingComponent ? (
+            loadingComponent
+          ) : (
+            <TableLoader />
+          )}
+      </>
     ) : (
-      <div className="flex justify-center p-4">
-        <Loader2 className="h-5 w-5 animate-spin text-white/70" />
+      <div>
+        {loadingComponent ? (
+          loadingComponent
+        ) : (
+          <TableLoader />
+        )}
       </div>
     )
   }
-  if (error && items.length === 0) {
-    return inTable ? (
-      <tr>
-        <td className="p-4 text-center text-red-500" colSpan={3}>
-          Error: {error}
-        </td>
-      </tr>
-    ) : (
-      <div className="p-4 text-center text-red-500">Error: {error}</div>
-    )
-  }
+  
   if (items.length === 0) {
+    if (emptyComponent) {
+      return inTable ? (
+        <tr>
+          <td colSpan={3}>{emptyComponent}</td>
+        </tr>
+      ) : (
+        <>{emptyComponent}</>
+      )
+    }
+
     return inTable ? (
       <tr>
         <td className="p-4 text-center text-gray-500" colSpan={3}>
@@ -161,16 +168,24 @@ export function InfiniteScrollList<T>({
         {items.map((item, i) => (
           <React.Fragment key={itemKey(item)}>
             {itemComponent(item)}
-            {i === items.length - 1 && hasMoreRef.current ? <tr>
+            {i === items.length - 1 && hasMoreRef.current ? (
+              <tr>
                 <td colSpan={3} ref={lastItemRef} />
-              </tr> : null}
+              </tr>
+            ) : null}
           </React.Fragment>
         ))}
-        {isLoading ? <tr>
+        {isLoading ? (
+          <tr>
             <td className="flex justify-center p-4" colSpan={3}>
-              <Loader2 className="h-5 w-5 animate-spin text-white/70" />
+              {loadingComponent ? (
+                loadingComponent
+              ) : (
+                <Loader2 className="h-5 w-5 animate-spin text-white/70" />
+              )}
             </td>
-          </tr> : null}
+          </tr>
+        ) : null}
       </>
     )
   }
@@ -187,7 +202,11 @@ export function InfiniteScrollList<T>({
 
       {isLoading && items.length > 0 ? (
         <div className="flex justify-center p-4">
-          <Loader2 className="h-5 w-5 animate-spin text-white/70" />
+          {loadingComponent ? (
+            loadingComponent
+          ) : (
+            <Loader2 className="h-5 w-5 animate-spin text-white/70" />
+          )}
         </div>
       ) : null}
     </div>

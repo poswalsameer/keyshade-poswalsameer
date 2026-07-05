@@ -1,31 +1,3 @@
-import { SecretWithValues } from '@/secret/secret.types'
-import { decrypt } from './cryptography'
-
-export async function getSecretWithValues(
-  secretWithVersion: SecretWithValues['secret'] & {
-    versions: SecretWithValues['values']
-  },
-  shouldBePlaintext?: boolean,
-  privateKey?: string
-): Promise<SecretWithValues> {
-  const values = secretWithVersion.versions
-
-  if (shouldBePlaintext && privateKey) {
-    await Promise.all(
-      values.map(async (value) => {
-        value.value = await decrypt(privateKey, value.value)
-      })
-    )
-  }
-
-  delete secretWithVersion.versions
-  const secret = secretWithVersion
-  return {
-    secret,
-    values
-  }
-}
-
 export function generateSecretValue(): string {
   const length = 20
   const digits = '0123456789'

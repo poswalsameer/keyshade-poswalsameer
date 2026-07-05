@@ -4,7 +4,15 @@ export const integrationTypeEnum = z.enum([
   'DISCORD',
   'SLACK',
   'GITHUB',
-  'GITLAB'
+  'GITLAB',
+  'VERCEL',
+  'AWS_LAMBDA',
+  'AWS_AMPLIFY',
+  'NETLIFY',
+  'DIGITAL_OCEAN',
+  'HEROKU',
+  'RAILWAY',
+  'FLYIO'
 ])
 
 export const expiresAfterEnum = z.enum(['never', '24', '168', '720', '8760'])
@@ -106,4 +114,36 @@ export const authProviderEnum = z.enum([
   'GITHUB',
   'GOOGLE',
   'GITLAB'
+])
+
+export const integrationRunStatusEnum = z.enum([
+  'RUNNING',
+  'SUCCESS',
+  'FAILURE'
+])
+
+export const subscriptionPlanEnum = z.enum([
+  'FREE',
+  'HACKER',
+  'TEAM',
+  'ENTERPRISE'
+])
+
+export const subscriptionStatusEnum = z.enum([
+  'INCOMPLETE',
+  'ACTIVE',
+  'PAST_DUE',
+  'CANCELLED',
+  'UNPAID'
+])
+
+export const subscriptionCancellationReasonEnum = z.enum([
+  'too_expensive',
+  'missing_features',
+  'switched_service',
+  'unused',
+  'customer_service',
+  'low_quality',
+  'too_complex',
+  'other'
 ])

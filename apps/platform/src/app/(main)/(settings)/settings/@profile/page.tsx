@@ -9,8 +9,8 @@ import { useHttp } from '@/hooks/use-http'
 import GeneralSettings from '@/components/userSettings/profile/generalSettings'
 import EmailSettings from '@/components/userSettings/profile/emailSettings'
 import DeleteProfile from '@/components/userSettings/profile/deleteProfile'
-import ApiKeySection from '@/components/userSettings/apiKeys/apiKeySection'
 import AuthProvider from '@/components/userSettings/profile/authProvider'
+import ShareReferralCode from '@/components/userSettings/profile/shareReferralCode'
 
 function ProfilePage(): React.JSX.Element {
   const setUser = useSetAtom(userAtom)
@@ -34,15 +34,16 @@ function ProfilePage(): React.JSX.Element {
     <main className="flex flex-col gap-y-10">
       <div className="pt-4">
         <h1 className="text-2xl font-bold">Profile</h1>
-        <p className="font-medium text-white/60 mt-2.5">
-          Changes made to your profile will be applied to all of your workspaces.
+        <p className="mt-2.5 font-medium text-white/60">
+          Changes made to your profile will be applied to all of your
+          workspaces.
         </p>
       </div>
       <GeneralSettings />
       <EmailSettings />
       <AuthProvider />
       <Separator className="w-full bg-white/15" />
-      <ApiKeySection />
+      <ShareReferralCode />
       <Separator className="w-full bg-white/15" />
       <DeleteProfile />
     </main>

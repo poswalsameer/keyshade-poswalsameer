@@ -1,13 +1,11 @@
 import BaseCommand from '@/commands/base.command'
-import { getDefaultProfile } from '@/util/profile'
 import type { ProfileConfig } from '@/types/index.types'
-import { fetchProfileConfig } from '@/util/configuration'
-import type {
-  CommandActionData,
-  CommandOption
-} from '@/types/command/command.types'
-import Table from 'cli-table'
-// import * as colors from 'colors'
+import {
+  fetchDefaultProfileConfig,
+  fetchProfileConfig
+} from '@/util/configuration'
+import { Table } from '@/util/table'
+import { Logger } from '@/util/logger'
 
 export default class ListProfile extends BaseCommand {
   private profiles: ProfileConfig
@@ -20,24 +18,11 @@ export default class ListProfile extends BaseCommand {
     return 'List all profiles'
   }
 
-  getOptions(): CommandOption[] {
-    return [
-      {
-        short: '-v',
-        long: '--verbose',
-        description: 'Prints everything',
-        defaultValue: false
-      }
-    ]
-  }
-
-  async action({ options }: CommandActionData): Promise<void> {
-    const { verbose } = options
+  async action(): Promise<void> {
     this.profiles = await fetchProfileConfig()
-    const defaultProfile = getDefaultProfile(this.profiles)
-    delete this.profiles.default
+    const { userId: defaultProfile } = await fetchDefaultProfileConfig()
 
-    this.printProfile(this.profiles, defaultProfile, verbose as boolean)
+    this.printProfile(this.profiles, defaultProfile)
   }
 
   /**
@@ -45,59 +30,28 @@ export default class ListProfile extends BaseCommand {
    *
    * @param profiles - The profile configuration object.
    * @param defaultProfile - The name of the default profile.
-   * @param verbose - A boolean indicating whether to display additional information.
    */
-  private printProfile(
-    profiles: ProfileConfig,
-    defaultProfile: string,
-    verbose: boolean
-  ) {
-    const table = new Table({
-      chars: {
-        top: '═',
-        'top-mid': '╤',
-        'top-left': '╔',
-        'top-right': '╗',
-        bottom: '═',
-        'bottom-mid': '╧',
-        'bottom-left': '╚',
-        'bottom-right': '╝',
-        left: '║',
-        'left-mid': '╟',
-        mid: '─',
-        'mid-mid': '┼',
-        right: '║',
-        'right-mid': '╢',
-        middle: '│'
-      }
-    })
+  private printProfile(profiles: ProfileConfig, defaultProfile: string) {
+    const profileKeys = Object.values(profiles)
 
-    if (verbose) {
-      const profileList = []
-      Object.keys(profiles).forEach((profile) => {
-        profileList.push([
-          `${defaultProfile === profile ? `${profile} (default)` : profile}`,
-          `${profiles[profile].apiKey}`,
-          `${profiles[profile].baseUrl}`,
-          `${profiles[profile].metrics_enabled ? 'Yes' : 'No'}`
-        ])
-      })
-      table.push(
-        ['Profile', 'API Key', 'Base URL', 'Metrics Enabled'],
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-        ...profileList
-      )
-    } else {
-      const profileList = []
-      Object.keys(profiles).forEach((profile) => {
-        profileList.push([
-          `${defaultProfile === profile ? `${profile} (default)` : profile}`
-        ])
-      })
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-      table.push(['Profile'], ...profileList)
+    if (profileKeys.length === 0) {
+      Logger.info('No profiles found')
+      return
     }
 
-    console.log(table.toString())
+    const headers = [
+      '👤 Profile',
+      '✉️ Email',
+      '🌐 Base URL',
+      '📊 Metrics Enabled'
+    ]
+    const rows = profileKeys.map((profile) => [
+      `${defaultProfile === profile.user.id ? '✅' : ''} ${profile.user.name}`,
+      profile.user.email,
+      profile.baseUrl,
+      profile.metricsEnabled ? 'Yes' : 'No'
+    ])
+
+    Table.render(headers, rows)
   }
 }
